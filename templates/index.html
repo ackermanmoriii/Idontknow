@@ -4,45 +4,36 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Music App</title>
-    
-    <!-- PWA MANIFEST (Embedded) -->
-    <!-- This tells Android to treat this website as a standalone app -->
-    <link rel="manifest" href="data:application/manifest+json;base64,eyJuYW1lIjogIk11c2ljIFBsYXllciIsICJzaG9ydF9uYW1lIjogIk11c2ljIiwgInN0YXJ0X3VybCI6ICIvIiwgImRpc3BsYXkiOiAic3RhbmRhbG9uZSIsICJiYWNrZ3JvdW5kX2NvbG9yIjogIiMxMjEyMTIiLCAidGhlbWVfY29sb3IiOiAiIzFkYjk1NCIsICJpY29ucyI6IFt7InNyYyI6ICJodHRwczovL2BjZG4uaWNvbi1pY29ucy5jb20vaWNvbnMyLzI2OTkvUE5HLzUxMi9tdXNpY19ub3RlX2ljb25fMTY4ODQyLnBuZyIsICJzaXplcyI6ICI1MTJ4NTEyIiwgInR5cGUiOiAiaW1hZ2UvcG5nIn1dfQ==">
-    
     <style>
+        /* --- Dark Theme --- */
         :root { --bg: #121212; --card: #1e1e1e; --text: #fff; --accent: #1db954; }
         body { background: var(--bg); color: var(--text); font-family: sans-serif; margin: 0; padding: 20px; display: flex; flex-direction: column; align-items: center; min-height: 100vh; }
-        .container { width: 100%; max-width: 500px; }
+        .container { width: 100%; max-width: 500px; padding-bottom: 50px; }
         h1 { color: var(--accent); margin-bottom: 20px; }
+        
         .search-box { display: flex; gap: 10px; margin-bottom: 20px; }
         input { flex: 1; padding: 15px; border-radius: 30px; border: none; background: #333; color: white; outline: none; }
         button { background: var(--accent); color: white; border: none; padding: 0 25px; border-radius: 30px; font-weight: bold; cursor: pointer; }
-        .card { background: var(--card); border-radius: 12px; padding: 20px; display: none; flex-direction: column; align-items: center; margin-top: 20px;}
+        
+        .card { background: var(--card); border-radius: 12px; padding: 20px; display: none; flex-direction: column; align-items: center; margin-top: 20px; width: 100%; box-sizing: border-box; }
         img { width: 100%; border-radius: 8px; margin-bottom: 15px; }
+        
         .btn-main { background: white; color: black; padding: 15px 30px; border-radius: 50px; font-weight: bold; margin-top: 20px; width: 100%; display: flex; justify-content: center; gap: 10px; cursor: pointer; border: none;}
         .btn-main:disabled { background: #555; color: #888; }
+        
         .play-only-btn { background: var(--accent); color: white; padding: 15px 30px; border-radius: 50px; font-weight: bold; margin-top: 15px; width: 100%; border: none; cursor: pointer; display: none; font-size: 1.2rem; }
+        
         audio { width: 100%; margin-top: 20px; display: none; }
         .spinner { width: 20px; height: 20px; border: 3px solid #555; border-top: 3px solid var(--accent); border-radius: 50%; animation: spin 1s infinite; display: none; }
         @keyframes spin { to { transform: rotate(360deg); } }
         #status { margin-top: 10px; color: #888; font-size: 0.9rem; text-align: center; }
-        
-        /* Install Prompt */
-        #installPrompt { display: none; background: #333; padding: 10px; border-radius: 8px; margin-bottom: 20px; text-align: center; font-size: 0.9rem; }
     </style>
 </head>
 <body>
     <div class="container">
         <h1>Music App</h1>
-        
-        <!-- Install Instructions -->
-        <div id="installPrompt">
-            📲 <b>Tip:</b> Add to Home Screen for background playback!<br>
-            (Menu -> Add to Home screen)
-        </div>
-
         <div class="search-box">
-            <input type="text" id="query" placeholder="Song name...">
+            <input type="text" id="query" placeholder="Song name..." enterkeyhint="search">
             <button onclick="search()">Go</button>
         </div>
         <div id="loader" class="spinner" style="margin: 0 auto;"></div>
@@ -50,13 +41,14 @@
         <div class="card" id="card">
             <img id="thumb" src="">
             <h3 id="title" style="text-align: center;"></h3>
-            <div id="artist" style="color: #bbb; font-size: 0.9rem; margin-bottom: 10px;"></div>
             
+            <!-- Step 1: Buffer -->
             <button class="btn-main" id="bufferBtn" onclick="bufferSong()">
                 <div class="spinner" id="btnSpin"></div>
                 <span id="btnText">Prepare Song</span>
             </button>
             
+            <!-- Step 2: Play -->
             <button class="play-only-btn" id="playNowBtn" onclick="playFromMemory()">
                 ▶ Play Song
             </button>
@@ -69,12 +61,7 @@
     <script>
         const sessionId = "sess_" + Date.now();
         let currentMemoryBlobUrl = null;
-        let currentMetadata = {}; 
-
-        // Detect if running as PWA
-        if (!window.matchMedia('(display-mode: standalone)').matches) {
-            document.getElementById('installPrompt').style.display = 'block';
-        }
+        let currentMetadata = {};
 
         async function search() {
             const q = document.getElementById('query').value;
@@ -96,9 +83,10 @@
                 document.getElementById('loader').style.display = 'none';
                 
                 if(res.ok) {
+                    // Save metadata for Lock Screen
                     currentMetadata = {
                         title: data.title,
-                        artist: "YouTube Audio",
+                        artist: "YouTube Stream",
                         artwork: [{ src: data.thumbnail, sizes: '512x512', type: 'image/png' }]
                     };
 
@@ -121,13 +109,15 @@
             status.innerText = "Downloading to browser memory...";
 
             try {
+                // 1. Fetch file from server
                 const res = await fetch(`/fetch_song?url=${encodeURIComponent(url)}&session_id=${sessionId}`);
                 if (!res.ok) throw new Error("Download failed");
 
+                // 2. Save to RAM (Blob)
                 const blob = await res.blob(); 
                 currentMemoryBlobUrl = URL.createObjectURL(blob);
 
-                status.innerText = "Ready to play.";
+                status.innerText = "Song buffered in RAM. Ready.";
                 document.getElementById('bufferBtn').style.display = 'none';
                 document.getElementById('playNowBtn').style.display = 'block';
 
@@ -144,18 +134,19 @@
             
             player.play()
             .then(() => {
-                // --- LOCK SCREEN & BACKGROUND MAGIC ---
+                // Lock Screen Support (Best effort for background play)
                 if ('mediaSession' in navigator) {
                     navigator.mediaSession.metadata = new MediaMetadata(currentMetadata);
-                    navigator.mediaSession.playbackState = "playing";
-                    
-                    navigator.mediaSession.setActionHandler('play', () => { player.play(); navigator.mediaSession.playbackState = "playing"; });
-                    navigator.mediaSession.setActionHandler('pause', () => { player.pause(); navigator.mediaSession.playbackState = "paused"; });
-                    navigator.mediaSession.setActionHandler('stop', () => { player.pause(); });
+                    navigator.mediaSession.setActionHandler('play', () => player.play());
+                    navigator.mediaSession.setActionHandler('pause', () => player.pause());
                 }
             })
-            .catch(e => console.log("Play failed", e));
+            .catch(e => console.log("Play error:", e));
             
+            document.getElementById('status').innerText = "Playing from Memory.";
+            document.getElementById('playNowBtn').style.display = 'none';
+
+            // Auto-delete from RAM
             player.onended = () => {
                 document.getElementById('status').innerText = "Finished. Memory cleared.";
                 URL.revokeObjectURL(currentMemoryBlobUrl); 
