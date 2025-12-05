@@ -5,7 +5,8 @@ import threading
 import logging
 import glob
 import base64
-from flask import Flask, render_template, request, jsonify, Response, stream_with_context
+import mimetypes
+from flask import Flask, render_template, request, jsonify, Response, stream_with_context, send_file
 from yt_dlp import YoutubeDL
 from apscheduler.schedulers.background import BackgroundScheduler
 
@@ -20,14 +21,12 @@ if not os.path.exists(DOWNLOAD_FOLDER):
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# --- COOKIE SETUP (Critical for Auth) ---
+# --- COOKIE SETUP ---
 COOKIE_FILE = 'cookies.txt'
 
-# Logic: Check for file existence first
 if os.path.exists(COOKIE_FILE):
     logger.info(f"✅ Found {COOKIE_FILE}, using it for authentication.")
 elif os.environ.get('YOUTUBE_COOKIES'):
-    # Fallback: Create file from Env Var if file is missing
     try:
         with open(COOKIE_FILE, 'wb') as f:
             f.write(base64.b64decode(os.environ.get('YOUTUBE_COOKIES')))
@@ -72,7 +71,7 @@ def delete_session_files(session_id):
     except Exception as e:
         logger.error(f"Error in delete_session_files: {e}")
 
-# --- Helper: Download Logic (Optimized for VPN) ---
+# --- Helper: Download Logic ---
 def download_video_thread(url, filename):
     active_downloads[filename] = 'downloading'
     output_template = os.path.join(DOWNLOAD_FOLDER, f"{filename}.%(ext)s")
@@ -83,23 +82,13 @@ def download_video_thread(url, filename):
         'noplaylist': True,
         'quiet': True,
         'no_warnings': True,
-        
-        # --- Authentication ---
         'cookiefile': COOKIE_FILE if os.path.exists(COOKIE_FILE) else None,
-        
-        # --- VPN/Network Resilience Settings ---
-        'source_address': '0.0.0.0', # Force IPv4
-        'socket_timeout': 60,        # Extended timeout for slow VPN handshake
-        'retries': 30,               # Retry aggressively on connection drop
-        'fragment_retries': 30,      # Retry individual chunks
-        'retry_sleep': 5,            # Wait 5s before retrying to avoid "hammering"
-        
-        # --- Micro-Chunking (The Fix for "Regressing Progress") ---
-        # Downloads in small 1MB pieces. If connection drops, we only lose 1MB.
+        'source_address': '0.0.0.0',
+        'socket_timeout': 60,
+        'retries': 30,
+        'fragment_retries': 30,
+        'retry_sleep': 5,
         'http_chunk_size': 1048576, 
-        
-        # --- Anti-Throttling ---
-        # Cap speed to 10MB/s to avoid looking like a bot/DDoS
         'ratelimit': 10000000, 
     }
 
@@ -135,14 +124,13 @@ def search():
         if session_id:
             delete_session_files(session_id)
 
-        # Search Options
         ydl_opts = {
             'noplaylist': True, 
             'quiet': True, 
             'default_search': 'ytsearch1',
             'no_warnings': True, 
             'source_address': '0.0.0.0',
-            'socket_timeout': 15, # Shorter timeout for search
+            'socket_timeout': 15,
             'cookiefile': COOKIE_FILE if os.path.exists(COOKIE_FILE) else None,
         }
         
@@ -169,38 +157,45 @@ def stream():
         return "Missing Data", 400
 
     file_id = f"{session_id}_{uuid.uuid4()}"
-    
     thread = threading.Thread(target=download_video_thread, args=(video_url, file_id))
     thread.start()
 
-    def generate():
-        filepath = None
-        timeout = 0
+    # --- SMART SERVING LOGIC ---
+    filepath = None
+    timeout = 0
+    
+    # 1. Wait for file to exist
+    while True:
+        matches = glob.glob(os.path.join(DOWNLOAD_FOLDER, f"{file_id}*"))
+        if matches:
+            temp_path = matches[0]
+            if os.path.exists(temp_path) and os.path.getsize(temp_path) > 2048:
+                filepath = temp_path
+                break
         
-        while True:
-            matches = glob.glob(os.path.join(DOWNLOAD_FOLDER, f"{file_id}*"))
-            if matches:
-                temp_path = matches[0]
-                # Wait for 2KB headers
-                if os.path.exists(temp_path) and os.path.getsize(temp_path) > 2048:
-                    filepath = temp_path
-                    break
-            
-            if active_downloads.get(file_id) == 'error': return
-            if timeout > 120: return # Allow 60 seconds (0.5 * 120) for initial connect (slow VPN)
-            
-            time.sleep(0.5)
-            timeout += 1
+        if active_downloads.get(file_id) == 'error': return "Download Failed", 500
+        if timeout > 120: return "Timeout", 504
+        time.sleep(0.5)
+        timeout += 1
 
+    # 2. Check: Is download ALREADY finished?
+    # If yes, send as a normal file (Better for Android playback!)
+    if active_downloads.get(file_id) == 'completed':
+        # Determine correct mimetype dynamically
+        mime_type = "audio/mp4"
+        if filepath.endswith(".webm"): mime_type = "audio/webm"
+        
+        return send_file(filepath, mimetype=mime_type, as_attachment=True, download_name=f"song{os.path.splitext(filepath)[1]}")
+
+    # 3. If still downloading, use Stream Generator
+    def generate():
         with open(filepath, "rb") as f:
             while True:
                 chunk = f.read(1024 * 64)
                 if chunk:
                     yield chunk
                 else:
-                    status = active_downloads.get(file_id)
-                    if status in ['completed', 'error']:
-                        break
+                    if active_downloads.get(file_id) in ['completed', 'error']: break
                     time.sleep(0.2)
 
     return Response(stream_with_context(generate()), mimetype="audio/mp4", headers={
