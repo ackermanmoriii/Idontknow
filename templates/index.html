@@ -1,0 +1,327 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <!-- Viewport settings for a Native App feel (prevents zooming) -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Stream & Download</title>
+    <style>
+        /* --- Native App UI Theme --- */
+        :root {
+            --bg-color: #121212;
+            --card-bg: #1e1e1e;
+            --text-main: #ffffff;
+            --text-sec: #b3b3b3;
+            --accent: #1db954; /* Spotify Green */
+        }
+
+        body {
+            background-color: var(--bg-color);
+            color: var(--text-main);
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            min-height: 100vh;
+            -webkit-tap-highlight-color: transparent; /* Remove blue tap box on Android */
+        }
+
+        .container {
+            width: 100%;
+            max-width: 500px;
+            padding-bottom: 50px;
+        }
+
+        h1 {
+            text-align: center;
+            margin-bottom: 25px;
+            color: var(--accent);
+            font-weight: 800;
+        }
+
+        /* Search Bar */
+        .search-container {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+
+        input {
+            flex: 1;
+            padding: 15px 20px;
+            border-radius: 30px;
+            border: none;
+            background: #282828;
+            color: white;
+            font-size: 16px;
+            outline: none;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+        }
+
+        input:focus {
+            background: #333;
+        }
+
+        button.search-btn {
+            background: var(--accent);
+            color: white;
+            border: none;
+            padding: 0 25px;
+            border-radius: 30px;
+            font-weight: bold;
+            font-size: 16px;
+            cursor: pointer;
+            transition: transform 0.1s;
+        }
+
+        button.search-btn:active {
+            transform: scale(0.95);
+        }
+
+        /* Results Card */
+        .card {
+            background: var(--card-bg);
+            border-radius: 12px;
+            padding: 20px;
+            display: none; /* Hidden by default */
+            flex-direction: column;
+            align-items: center;
+            box-shadow: 0 8px 20px rgba(0,0,0,0.4);
+            animation: slideUp 0.3s ease-out;
+        }
+
+        @keyframes slideUp { from { transform: translateY(20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+
+        img.thumbnail {
+            width: 100%;
+            aspect-ratio: 16/9;
+            object-fit: cover;
+            border-radius: 8px;
+            margin-bottom: 15px;
+            background: #000;
+        }
+
+        .title {
+            font-size: 1.1rem;
+            font-weight: bold;
+            margin-bottom: 5px;
+            text-align: center;
+            line-height: 1.4;
+        }
+
+        /* Action Button */
+        .play-btn {
+            background: #ffffff;
+            color: #000;
+            border: none;
+            padding: 16px 30px;
+            border-radius: 50px;
+            font-size: 16px;
+            font-weight: bold;
+            margin-top: 20px;
+            cursor: pointer;
+            width: 100%;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 10px;
+            transition: background 0.2s;
+        }
+
+        .play-btn:active { background: #e0e0e0; }
+        .play-btn:disabled { background: #555; color: #888; cursor: not-allowed; }
+
+        /* Status & Audio */
+        .status { margin-top: 15px; font-size: 0.9rem; color: var(--text-sec); text-align: center; min-height: 20px; }
+        
+        audio {
+            width: 100%;
+            margin-top: 20px;
+            display: none;
+            border-radius: 50px;
+        }
+
+        /* Spinner */
+        .spinner {
+            width: 22px;
+            height: 22px;
+            border: 3px solid rgba(255,255,255,0.1);
+            border-top: 3px solid var(--accent);
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+            display: none;
+        }
+        
+        #btnSpinner { border-top-color: #000; } /* Dark spinner for white button */
+
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <h1>Music App</h1>
+
+        <div class="search-container">
+            <input type="text" id="query" placeholder="Enter song name..." enterkeyhint="search">
+            <button class="search-btn" onclick="searchSong()">Go</button>
+        </div>
+        
+        <!-- Main Loader -->
+        <div id="mainLoader" class="spinner" style="margin: 20px auto;"></div>
+
+        <div class="card" id="resultCard">
+            <img id="thumb" class="thumbnail" src="" alt="Album Art">
+            <div class="title" id="songTitle"></div>
+            
+            <button class="play-btn" id="actionBtn" onclick="playAndDownload()">
+                <div class="spinner" id="btnSpinner"></div>
+                <span id="btnText">Play & Download</span>
+            </button>
+
+            <div class="status" id="statusMsg"></div>
+
+            <audio id="audioPlayer" controls controlsList="nodownload"></audio>
+        </div>
+    </div>
+
+    <script>
+        // --- 1. Session Management ---
+        // Generate a random Session ID when the page loads. 
+        // This ID allows the server to group your files and delete them when you leave.
+        const sessionId = "sess_" + Math.random().toString(36).substr(2, 9) + Date.now().toString(36);
+        console.log("Current Session ID:", sessionId);
+
+        // --- 2. Auto-Cleanup Triggers ---
+        // When the user closes the tab, minimizes the app, or switches apps,
+        // we signal the backend to delete their specific files.
+        function sendCleanupSignal() {
+            const blob = new Blob([sessionId], {type: 'text/plain'});
+            // sendBeacon is robust; it works even if the JS thread is being killed.
+            navigator.sendBeacon('/cleanup_session', blob);
+        }
+
+        // Trigger on mobile app switch / screen lock / tab close
+        document.addEventListener('visibilitychange', function() {
+            if (document.visibilityState === 'hidden') {
+                sendCleanupSignal();
+            }
+        });
+
+        // Trigger on explicit browser unload
+        window.addEventListener('pagehide', sendCleanupSignal);
+
+
+        // --- 3. Search Functionality ---
+        async function searchSong() {
+            const query = document.getElementById('query').value.trim();
+            if (!query) return;
+
+            // Hide keyboard on mobile
+            document.getElementById('query').blur();
+
+            // UI Reset
+            document.getElementById('resultCard').style.display = 'none';
+            document.getElementById('mainLoader').style.display = 'block';
+            document.getElementById('audioPlayer').pause();
+            document.getElementById('audioPlayer').style.display = 'none';
+            
+            try {
+                // We send the Session ID in the headers.
+                // The server uses this to delete any *previous* song you downloaded
+                // before starting the search for the new one.
+                const res = await fetch('/search', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-Session-ID': sessionId 
+                    },
+                    body: JSON.stringify({query: query})
+                });
+
+                const data = await res.json();
+                document.getElementById('mainLoader').style.display = 'none';
+
+                if (res.ok) {
+                    document.getElementById('thumb').src = data.thumbnail;
+                    document.getElementById('songTitle').innerText = data.title;
+                    document.getElementById('resultCard').style.display = 'flex';
+                    
+                    // Store the URL on the button for the next step
+                    document.getElementById('actionBtn').dataset.url = data.url;
+                    
+                    resetButton();
+                } else {
+                    document.getElementById('statusMsg').innerText = "Error: " + data.error;
+                }
+            } catch (err) {
+                document.getElementById('mainLoader').style.display = 'none';
+                alert("Connection failed. Please check your VPN.");
+            }
+        }
+
+        // --- 4. Stream & Download Logic ---
+        function playAndDownload() {
+            const url = document.getElementById('actionBtn').dataset.url;
+            const btn = document.getElementById('actionBtn');
+            const btnText = document.getElementById('btnText');
+            const btnSpinner = document.getElementById('btnSpinner');
+            const player = document.getElementById('audioPlayer');
+            const status = document.getElementById('statusMsg');
+
+            // UI: Loading State
+            btn.disabled = true;
+            btnText.innerText = "Buffering...";
+            btnSpinner.style.display = 'block';
+            status.innerText = "Connecting to stream...";
+
+            // We append session_id to the URL so the backend knows which file belongs to who
+            const streamUrl = `/stream?url=${encodeURIComponent(url)}&session_id=${sessionId}`;
+
+            player.src = streamUrl;
+            player.style.display = 'block';
+            player.load();
+            
+            // Event: Buffer enough data to play
+            player.oncanplay = () => {
+                status.innerText = "Playing...";
+                btnText.innerText = "Playing";
+                btnSpinner.style.display = 'none';
+                player.play();
+            };
+
+            // Event: Song finished
+            player.onended = () => {
+                status.innerText = "Finished.";
+                resetButton();
+            };
+            
+            // Event: Error / Network Drop
+            player.onerror = () => {
+                status.innerText = "Network stutter. Retrying...";
+                // Simple retry logic for VPN instability
+                setTimeout(() => {
+                    if(player.error && player.error.code !== 4) { // 4 is unsupported format
+                         player.load();
+                    }
+                }, 2000);
+            };
+        }
+
+        function resetButton() {
+            const btn = document.getElementById('actionBtn');
+            btn.disabled = false;
+            document.getElementById('btnText').innerText = "Play & Download";
+            document.getElementById('btnSpinner').style.display = 'none';
+        }
+
+        // Enable "Enter" key for search
+        document.getElementById('query').addEventListener('keypress', function (e) {
+            if (e.key === 'Enter') searchSong();
+        });
+
+    </script>
+</body>
+</html>
