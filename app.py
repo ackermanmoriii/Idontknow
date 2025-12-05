@@ -20,23 +20,20 @@ if not os.path.exists(DOWNLOAD_FOLDER):
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# --- COOKIE SETUP (Critical for Cloud Deployment) ---
-# This fixes the "Sign in to confirm you are not a bot" error on Koyeb.
+# --- COOKIE SETUP (Critical for Auth) ---
 COOKIE_FILE = 'cookies.txt'
 
-# Option A: Check if cookies are provided via Environment Variable (Best Practice for Security)
-if os.environ.get('YOUTUBE_COOKIES'):
+# Logic: Check for file existence first
+if os.path.exists(COOKIE_FILE):
+    logger.info(f"✅ Found {COOKIE_FILE}, using it for authentication.")
+elif os.environ.get('YOUTUBE_COOKIES'):
+    # Fallback: Create file from Env Var if file is missing
     try:
-        # Decode Base64 cookies and write to file
         with open(COOKIE_FILE, 'wb') as f:
             f.write(base64.b64decode(os.environ.get('YOUTUBE_COOKIES')))
         logger.info("✅ Created cookies.txt from Environment Variable.")
     except Exception as e:
         logger.error(f"❌ Failed to load cookies from Env Var: {e}")
-
-# Option B: Check if the file exists (uploaded manually by you)
-if os.path.exists(COOKIE_FILE):
-    logger.info(f"✅ Found {COOKIE_FILE}, using it for authentication.")
 else:
     logger.warning("⚠️ WARNING: No cookies found. YouTube will likely block this request.")
 
@@ -45,7 +42,6 @@ active_downloads = {}
 
 # --- RESILIENCE: Background Failsafe Cleanup ---
 def clean_stale_files():
-    """Deletes files older than 20 minutes in case the VPN disconnects."""
     try:
         now = time.time()
         cutoff = 20 * 60  # 20 minutes expiration
@@ -182,11 +178,10 @@ def stream():
         timeout = 0
         
         while True:
-            # Look for the file growing on disk
             matches = glob.glob(os.path.join(DOWNLOAD_FOLDER, f"{file_id}*"))
             if matches:
                 temp_path = matches[0]
-                # Wait for at least 2KB of headers so browser knows format
+                # Wait for 2KB headers
                 if os.path.exists(temp_path) and os.path.getsize(temp_path) > 2048:
                     filepath = temp_path
                     break
