@@ -3,6 +3,9 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <!-- Links the Background Engine (Manifest) -->
+    <link rel="manifest" href="/manifest.json">
+    <meta name="theme-color" content="#1db954">
     <title>Music App</title>
     <style>
         /* --- Dark Theme --- */
@@ -23,11 +26,6 @@
         
         .play-only-btn { background: var(--accent); color: white; padding: 15px 30px; border-radius: 50px; font-weight: bold; margin-top: 15px; width: 100%; border: none; cursor: pointer; display: none; font-size: 1.2rem; }
         
-        /* Action Buttons Container */
-        .actions { width: 100%; display: flex; gap: 10px; margin-top: 15px; display: none; }
-        .btn-play { background: var(--accent); color: white; padding: 15px; border-radius: 50px; font-weight: bold; flex: 2; border: none; cursor: pointer; font-size: 1.1rem; }
-        .btn-save { background: #333; color: white; padding: 15px; border-radius: 50px; font-weight: bold; flex: 1; border: none; cursor: pointer; font-size: 1.1rem; display: flex; justify-content: center; align-items: center;}
-
         audio { width: 100%; margin-top: 20px; display: none; }
         .spinner { width: 20px; height: 20px; border: 3px solid #555; border-top: 3px solid var(--accent); border-radius: 50%; animation: spin 1s infinite; display: none; }
         @keyframes spin { to { transform: rotate(360deg); } }
@@ -47,17 +45,16 @@
             <img id="thumb" src="">
             <h3 id="title" style="text-align: center;"></h3>
             
-            <!-- Step 1: Buffer -->
+            <!-- Step 1: Buffer Button -->
             <button class="btn-main" id="bufferBtn" onclick="bufferSong()">
                 <div class="spinner" id="btnSpin"></div>
                 <span id="btnText">Prepare Song</span>
             </button>
             
-            <!-- Step 2: Play & Save (Hidden initially) -->
-            <div class="actions" id="actionArea">
-                <button class="btn-play" onclick="playFromMemory()">▶ Play</button>
-                <button class="btn-save" onclick="saveToPhone()">💾 Save</button>
-            </div>
+            <!-- Step 2: Play Button (Hidden initially) -->
+            <button class="play-only-btn" id="playNowBtn" onclick="playSong()">
+                ▶ Play Song
+            </button>
             
             <div id="status"></div>
             <audio id="player" controls controlsList="nodownload"></audio>
@@ -66,14 +63,25 @@
 
     <script>
         const sessionId = "sess_" + Date.now();
-        let currentMemoryBlobUrl = null;
         let currentMetadata = {};
+
+        // 1. Install Background Engine (Service Worker)
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.register('/sw.js')
+                .then(() => console.log("Background Audio Engine Ready"))
+                .catch(err => console.log("Engine Fail", err));
+        }
 
         async function search() {
             const q = document.getElementById('query').value;
             if(!q) return;
             
-            if (currentMemoryBlobUrl) { URL.revokeObjectURL(currentMemoryBlobUrl); currentMemoryBlobUrl = null; }
+            // Clean up ANY old cached songs when searching
+            if ('caches' in window) {
+                caches.open('temp-music-cache').then(cache => {
+                    cache.delete('/virtual-song.mp3');
+                });
+            }
 
             document.getElementById('card').style.display = 'none';
             document.getElementById('loader').style.display = 'block';
@@ -89,13 +97,7 @@
                 document.getElementById('loader').style.display = 'none';
                 
                 if(res.ok) {
-                    // Save metadata for Lock Screen
-                    currentMetadata = {
-                        title: data.title,
-                        artist: "YouTube Stream",
-                        artwork: [{ src: data.thumbnail, sizes: '512x512', type: 'image/png' }]
-                    };
-
+                    currentMetadata = { title: data.title, artwork: [{ src: data.thumbnail, sizes: '512x512', type: 'image/png' }] };
                     document.getElementById('thumb').src = data.thumbnail;
                     document.getElementById('title').innerText = data.title;
                     document.getElementById('card').style.display = 'flex';
@@ -112,20 +114,21 @@
             document.getElementById('bufferBtn').disabled = true;
             document.getElementById('btnSpin').style.display = 'block';
             document.getElementById('btnText').innerText = "Caching...";
-            status.innerText = "Downloading to browser memory...";
+            status.innerText = "Saving to Internal App Cache...";
 
             try {
-                // 1. Fetch file from server (Wait for full download)
+                // 1. Fetch file from server
                 const res = await fetch(`/fetch_song?url=${encodeURIComponent(url)}&session_id=${sessionId}`);
                 if (!res.ok) throw new Error("Download failed");
 
-                // 2. Save to RAM (Blob)
-                const blob = await res.blob(); 
-                currentMemoryBlobUrl = URL.createObjectURL(blob);
+                // 2. Save to HIDDEN Internal Cache
+                const cache = await caches.open('temp-music-cache');
+                // We save it as a "Virtual URL" so the Service Worker can find it later
+                await cache.put('/virtual-song.mp3', res);
 
-                status.innerText = "Song buffered in RAM. Ready.";
+                status.innerText = "Cached. Ready to Play in Background.";
                 document.getElementById('bufferBtn').style.display = 'none';
-                document.getElementById('actionArea').style.display = 'flex';
+                document.getElementById('playNowBtn').style.display = 'block';
 
             } catch (err) {
                 status.innerText = "Error: " + err.message;
@@ -133,45 +136,33 @@
             }
         }
 
-        function playFromMemory() {
+        function playSong() {
             const player = document.getElementById('player');
-            player.src = currentMemoryBlobUrl;
+            
+            // 3. Play from Virtual URL (Intercepted by Service Worker)
+            // Adding timestamp forces browser to reload the audio element
+            player.src = '/virtual-song.mp3?t=' + Date.now();
             player.style.display = 'block';
             
-            player.play()
-            .then(() => {
-                // Lock Screen Support (Best effort for background play)
+            player.play().then(() => {
                 if ('mediaSession' in navigator) {
                     navigator.mediaSession.metadata = new MediaMetadata(currentMetadata);
                     navigator.mediaSession.setActionHandler('play', () => player.play());
                     navigator.mediaSession.setActionHandler('pause', () => player.pause());
                 }
-            })
-            .catch(e => console.log("Play error:", e));
+            });
             
-            document.getElementById('status').innerText = "Playing from Memory.";
+            document.getElementById('status').innerText = "Playing via Internal Cache.";
+            document.getElementById('playNowBtn').style.display = 'none';
             
-            // Auto-delete from RAM
+            // 4. Auto-Delete from Cache when finished
             player.onended = () => {
-                document.getElementById('status').innerText = "Finished. Memory cleared.";
-                URL.revokeObjectURL(currentMemoryBlobUrl); 
-                currentMemoryBlobUrl = null;
+                document.getElementById('status').innerText = "Finished. Cache cleared.";
+                caches.open('temp-music-cache').then(cache => {
+                    cache.delete('/virtual-song.mp3');
+                });
                 resetUI();
             };
-        }
-
-        // --- SAVE TO PHONE FUNCTION ---
-        function saveToPhone() {
-            if (!currentMemoryBlobUrl) return;
-            
-            const a = document.createElement('a');
-            a.href = currentMemoryBlobUrl;
-            a.download = document.getElementById('title').innerText + ".m4a"; 
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-            
-            document.getElementById('status').innerText = "Saved to Downloads folder.";
         }
 
         function resetUI() {
@@ -179,7 +170,7 @@
             document.getElementById('bufferBtn').style.display = 'flex';
             document.getElementById('btnText').innerText = "Prepare Song";
             document.getElementById('btnSpin').style.display = 'none';
-            document.getElementById('actionArea').style.display = 'none';
+            document.getElementById('playNowBtn').style.display = 'none';
             document.getElementById('player').style.display = 'none';
         }
         
