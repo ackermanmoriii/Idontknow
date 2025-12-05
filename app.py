@@ -76,7 +76,7 @@ def run_download(url, file_id):
         'no_warnings': True,
         'cookiefile': COOKIE_FILE if os.path.exists(COOKIE_FILE) else None,
         'source_address': '0.0.0.0',
-        # Robust Network Settings for VPN
+        # Robust Network Settings
         'socket_timeout': 60,
         'retries': 30,
         'fragment_retries': 30,
@@ -139,7 +139,7 @@ def fetch_song():
 
     file_id = f"{session_id}_{uuid.uuid4()}"
     
-    # 1. Start Download in Background Thread
+    # 1. Start Download in Thread
     thread = threading.Thread(target=run_download, args=(video_url, file_id))
     thread.start()
 
@@ -148,10 +148,9 @@ def fetch_song():
     timeout = 0
     filepath = None
     
-    # Wait loop (up to 60 seconds)
-    while timeout < 120: 
+    while timeout < 120: # Wait up to 120 seconds for slow VPN
         if active_downloads.get(file_id) == 'completed':
-            # Find the actual file (ignoring extension)
+            # Find the file
             matches = glob.glob(os.path.join(DOWNLOAD_FOLDER, f"{file_id}*"))
             if matches:
                 filepath = matches[0]
@@ -159,11 +158,11 @@ def fetch_song():
         elif active_downloads.get(file_id) == 'error':
             return "Download Error", 500
             
-        time.sleep(0.5)
+        time.sleep(1) # Check every second
         timeout += 1
 
     if filepath and os.path.exists(filepath):
-        # Send the file with correct length headers (Crucial for Blob)
+        # Send the file with correct length headers
         return send_file(filepath, as_attachment=True, download_name="song.m4a")
     else:
         return "Timeout or File Missing", 504
