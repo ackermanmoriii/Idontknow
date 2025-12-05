@@ -2,7 +2,6 @@
 FROM python:3.10-slim
 
 # 1. Install System Dependencies (FFmpeg is critical here)
-# We also install 'curl' just in case we need to debug connectivity
 RUN apt-get update && \
     apt-get install -y ffmpeg curl && \
     rm -rf /var/lib/apt/lists/*
@@ -14,7 +13,7 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# 4. Copy the rest of the app code (including cookies.txt)
+# 4. Copy the rest of the app code
 COPY . .
 
 # 5. Run the app using Gunicorn
