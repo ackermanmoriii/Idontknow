@@ -2,7 +2,6 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <!-- Viewport settings for a Native App feel (prevents zooming) -->
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Stream & Download</title>
     <style>
@@ -25,7 +24,7 @@
             flex-direction: column;
             align-items: center;
             min-height: 100vh;
-            -webkit-tap-highlight-color: transparent; /* Remove blue tap box on Android */
+            -webkit-tap-highlight-color: transparent;
         }
 
         .container {
@@ -60,10 +59,6 @@
             box-shadow: 0 2px 5px rgba(0,0,0,0.2);
         }
 
-        input:focus {
-            background: #333;
-        }
-
         button.search-btn {
             background: var(--accent);
             color: white;
@@ -73,11 +68,6 @@
             font-weight: bold;
             font-size: 16px;
             cursor: pointer;
-            transition: transform 0.1s;
-        }
-
-        button.search-btn:active {
-            transform: scale(0.95);
         }
 
         /* Results Card */
@@ -85,14 +75,11 @@
             background: var(--card-bg);
             border-radius: 12px;
             padding: 20px;
-            display: none; /* Hidden by default */
+            display: none;
             flex-direction: column;
             align-items: center;
             box-shadow: 0 8px 20px rgba(0,0,0,0.4);
-            animation: slideUp 0.3s ease-out;
         }
-
-        @keyframes slideUp { from { transform: translateY(20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
 
         img.thumbnail {
             width: 100%;
@@ -127,10 +114,8 @@
             justify-content: center;
             align-items: center;
             gap: 10px;
-            transition: background 0.2s;
         }
 
-        .play-btn:active { background: #e0e0e0; }
         .play-btn:disabled { background: #555; color: #888; cursor: not-allowed; }
 
         /* Status & Audio */
@@ -154,7 +139,7 @@
             display: none;
         }
         
-        #btnSpinner { border-top-color: #000; } /* Dark spinner for white button */
+        #btnSpinner { border-top-color: #000; }
 
         @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
     </style>
@@ -169,7 +154,6 @@
             <button class="search-btn" onclick="searchSong()">Go</button>
         </div>
         
-        <!-- Main Loader -->
         <div id="mainLoader" class="spinner" style="margin: 20px auto;"></div>
 
         <div class="card" id="resultCard">
@@ -189,49 +173,27 @@
 
     <script>
         // --- 1. Session Management ---
-        // Generate a random Session ID when the page loads. 
-        // This ID allows the server to group your files and delete them when you leave.
         const sessionId = "sess_" + Math.random().toString(36).substr(2, 9) + Date.now().toString(36);
         console.log("Current Session ID:", sessionId);
 
-        // --- 2. Auto-Cleanup Triggers ---
-        // When the user closes the tab, minimizes the app, or switches apps,
-        // we signal the backend to delete their specific files.
-        function sendCleanupSignal() {
-            const blob = new Blob([sessionId], {type: 'text/plain'});
-            // sendBeacon is robust; it works even if the JS thread is being killed.
-            navigator.sendBeacon('/cleanup_session', blob);
-        }
+        // REMOVED: The aggressive 'visibilitychange' cleanup code.
+        // We now rely on the "New Search" cleanup and the Server's 20-min timeout.
+        // This ensures the song keeps playing even if you lock your phone.
 
-        // Trigger on mobile app switch / screen lock / tab close
-        document.addEventListener('visibilitychange', function() {
-            if (document.visibilityState === 'hidden') {
-                sendCleanupSignal();
-            }
-        });
-
-        // Trigger on explicit browser unload
-        window.addEventListener('pagehide', sendCleanupSignal);
-
-
-        // --- 3. Search Functionality ---
+        // --- 2. Search Functionality ---
         async function searchSong() {
             const query = document.getElementById('query').value.trim();
             if (!query) return;
 
-            // Hide keyboard on mobile
             document.getElementById('query').blur();
-
-            // UI Reset
             document.getElementById('resultCard').style.display = 'none';
             document.getElementById('mainLoader').style.display = 'block';
             document.getElementById('audioPlayer').pause();
             document.getElementById('audioPlayer').style.display = 'none';
             
             try {
-                // We send the Session ID in the headers.
-                // The server uses this to delete any *previous* song you downloaded
-                // before starting the search for the new one.
+                // Sending Session ID allows server to delete OLD songs from THIS session
+                // before downloading the new one.
                 const res = await fetch('/search', {
                     method: 'POST',
                     headers: {
@@ -248,10 +210,7 @@
                     document.getElementById('thumb').src = data.thumbnail;
                     document.getElementById('songTitle').innerText = data.title;
                     document.getElementById('resultCard').style.display = 'flex';
-                    
-                    // Store the URL on the button for the next step
                     document.getElementById('actionBtn').dataset.url = data.url;
-                    
                     resetButton();
                 } else {
                     document.getElementById('statusMsg').innerText = "Error: " + data.error;
@@ -262,7 +221,7 @@
             }
         }
 
-        // --- 4. Stream & Download Logic ---
+        // --- 3. Stream & Download Logic ---
         function playAndDownload() {
             const url = document.getElementById('actionBtn').dataset.url;
             const btn = document.getElementById('actionBtn');
@@ -271,20 +230,17 @@
             const player = document.getElementById('audioPlayer');
             const status = document.getElementById('statusMsg');
 
-            // UI: Loading State
             btn.disabled = true;
             btnText.innerText = "Buffering...";
             btnSpinner.style.display = 'block';
             status.innerText = "Connecting to stream...";
 
-            // We append session_id to the URL so the backend knows which file belongs to who
             const streamUrl = `/stream?url=${encodeURIComponent(url)}&session_id=${sessionId}`;
 
             player.src = streamUrl;
             player.style.display = 'block';
             player.load();
             
-            // Event: Buffer enough data to play
             player.oncanplay = () => {
                 status.innerText = "Playing...";
                 btnText.innerText = "Playing";
@@ -292,18 +248,16 @@
                 player.play();
             };
 
-            // Event: Song finished
             player.onended = () => {
                 status.innerText = "Finished.";
                 resetButton();
             };
             
-            // Event: Error / Network Drop
             player.onerror = () => {
                 status.innerText = "Network stutter. Retrying...";
-                // Simple retry logic for VPN instability
+                // Retry logic for unstable connections
                 setTimeout(() => {
-                    if(player.error && player.error.code !== 4) { // 4 is unsupported format
+                    if(player.error && player.error.code !== 4) {
                          player.load();
                     }
                 }, 2000);
@@ -317,11 +271,9 @@
             document.getElementById('btnSpinner').style.display = 'none';
         }
 
-        // Enable "Enter" key for search
         document.getElementById('query').addEventListener('keypress', function (e) {
             if (e.key === 'Enter') searchSong();
         });
-
     </script>
 </body>
 </html>
