@@ -29,7 +29,6 @@ elif os.environ.get('YOUTUBE_COOKIES'):
             f.write(base64.b64decode(os.environ.get('YOUTUBE_COOKIES')))
     except Exception: pass
 
-# Track active downloads
 active_downloads = {}
 
 # --- CLEANUP ---
@@ -39,7 +38,7 @@ def clean_stale_files():
         for filename in os.listdir(DOWNLOAD_FOLDER):
             filepath = os.path.join(DOWNLOAD_FOLDER, filename)
             if os.path.isfile(filepath):
-                if now - os.path.getctime(filepath) > 600: # 10 mins
+                if now - os.path.getctime(filepath) > 600: 
                     os.remove(filepath)
     except Exception: pass
 
@@ -47,34 +46,33 @@ scheduler = BackgroundScheduler()
 scheduler.add_job(func=clean_stale_files, trigger="interval", minutes=5)
 scheduler.start()
 
-# --- PWA ROUTES (THE FIX) ---
+# --- PWA BACKGROUND ENGINE (CRITICAL) ---
 @app.route('/manifest.json')
 def manifest():
-    # Tells Android this is a real app
-    content = {
-        "name": "Music Streamer",
-        "short_name": "MusicApp",
+    return jsonify({
+        "name": "Music Player",
+        "short_name": "Music",
         "start_url": "/",
         "display": "standalone",
         "background_color": "#121212",
         "theme_color": "#1db954",
         "icons": [{"src": "https://cdn-icons-png.flaticon.com/512/727/727218.png", "sizes": "512x512", "type": "image/png"}]
-    }
-    return jsonify(content)
+    })
 
 @app.route('/sw.js')
 def service_worker():
-    # Background Worker script
+    # This script runs in the background to serve audio from Cache
     js_content = """
     self.addEventListener('install', event => self.skipWaiting());
     self.addEventListener('activate', event => event.waitUntil(clients.claim()));
     
-    // Intercept audio requests and serve from Cache
     self.addEventListener('fetch', event => {
-        if (event.request.url.includes('/current-song.mp3')) {
+        // If the browser asks for the virtual song file...
+        if (event.request.url.includes('/virtual-song.mp3')) {
             event.respondWith(
-                caches.open('music-cache').then(cache => {
-                    return cache.match('/current-song.mp3').then(response => {
+                caches.open('temp-music-cache').then(cache => {
+                    return cache.match('/virtual-song.mp3').then(response => {
+                        // Serve it from the Internal Cache
                         return response || new Response("Buffering...", {status: 200});
                     });
                 })
