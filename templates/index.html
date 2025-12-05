@@ -79,6 +79,8 @@
             flex-direction: column;
             align-items: center;
             box-shadow: 0 8px 20px rgba(0,0,0,0.4);
+            width: 100%;
+            box-sizing: border-box;
         }
 
         img.thumbnail {
@@ -96,6 +98,7 @@
             margin-bottom: 5px;
             text-align: center;
             line-height: 1.4;
+            color: var(--text-main);
         }
 
         /* Action Button */
@@ -160,7 +163,7 @@
             <img id="thumb" class="thumbnail" src="" alt="Album Art">
             <div class="title" id="songTitle"></div>
             
-            <button class="play-btn" id="actionBtn" onclick="playAndDownload()">
+            <button class="play-btn" id="actionBtn" onclick="processSong()">
                 <div class="spinner" id="btnSpinner"></div>
                 <span id="btnText">Play & Download</span>
             </button>
@@ -172,34 +175,32 @@
     </div>
 
     <script>
-        // --- 1. Session Management ---
-        const sessionId = "sess_" + Math.random().toString(36).substr(2, 9) + Date.now().toString(36);
-        console.log("Current Session ID:", sessionId);
+        // Unique ID for this user session
+        const sessionId = "sess_" + Date.now() + Math.random().toString(36).substr(2, 5);
+        
+        // Variable to hold the song in browser memory
+        let currentMemoryBlobUrl = null;
 
-        // REMOVED: The aggressive 'visibilitychange' cleanup code.
-        // We now rely on the "New Search" cleanup and the Server's 20-min timeout.
-        // This ensures the song keeps playing even if you lock your phone.
-
-        // --- 2. Search Functionality ---
+        // --- 1. SEARCH FUNCTION ---
         async function searchSong() {
             const query = document.getElementById('query').value.trim();
             if (!query) return;
+
+            // CLEAR MEMORY: Revoke old file from RAM to save space
+            if (currentMemoryBlobUrl) {
+                URL.revokeObjectURL(currentMemoryBlobUrl);
+                currentMemoryBlobUrl = null;
+            }
 
             document.getElementById('query').blur();
             document.getElementById('resultCard').style.display = 'none';
             document.getElementById('mainLoader').style.display = 'block';
             document.getElementById('audioPlayer').pause();
-            document.getElementById('audioPlayer').style.display = 'none';
             
             try {
-                // Sending Session ID allows server to delete OLD songs from THIS session
-                // before downloading the new one.
                 const res = await fetch('/search', {
                     method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'X-Session-ID': sessionId 
-                    },
+                    headers: { 'Content-Type': 'application/json', 'X-Session-ID': sessionId },
                     body: JSON.stringify({query: query})
                 });
 
@@ -212,56 +213,69 @@
                     document.getElementById('resultCard').style.display = 'flex';
                     document.getElementById('actionBtn').dataset.url = data.url;
                     resetButton();
+                    document.getElementById('statusMsg').innerText = "";
                 } else {
                     document.getElementById('statusMsg').innerText = "Error: " + data.error;
                 }
             } catch (err) {
                 document.getElementById('mainLoader').style.display = 'none';
-                alert("Connection failed. Please check your VPN.");
+                alert("Connection failed. Check VPN.");
             }
         }
 
-        // --- 3. Stream & Download Logic ---
-        function playAndDownload() {
+        // --- 2. DOWNLOAD & PLAY FUNCTION (Browser Memory Logic) ---
+        async function processSong() {
             const url = document.getElementById('actionBtn').dataset.url;
             const btn = document.getElementById('actionBtn');
             const btnText = document.getElementById('btnText');
             const btnSpinner = document.getElementById('btnSpinner');
-            const player = document.getElementById('audioPlayer');
             const status = document.getElementById('statusMsg');
+            const player = document.getElementById('audioPlayer');
 
+            // Set Loading State
             btn.disabled = true;
-            btnText.innerText = "Buffering...";
+            btnText.innerText = "Downloading...";
             btnSpinner.style.display = 'block';
-            status.innerText = "Connecting to stream...";
+            status.innerText = "Downloading to browser memory...";
 
-            const streamUrl = `/stream?url=${encodeURIComponent(url)}&session_id=${sessionId}`;
+            try {
+                // A. Request the stream
+                const streamUrl = `/stream?url=${encodeURIComponent(url)}&session_id=${sessionId}`;
+                const response = await fetch(streamUrl);
 
-            player.src = streamUrl;
-            player.style.display = 'block';
-            player.load();
-            
-            player.oncanplay = () => {
-                status.innerText = "Playing...";
-                btnText.innerText = "Playing";
-                btnSpinner.style.display = 'none';
+                if (!response.ok) throw new Error("Download failed");
+
+                // B. Save stream to Browser Memory (Blob)
+                // This waits until the file is fully downloaded
+                const blob = await response.blob();
+                
+                // Create a temporary local URL pointing to the RAM
+                currentMemoryBlobUrl = URL.createObjectURL(blob);
+
+                // C. Play from RAM (Instant, no stutter)
+                player.src = currentMemoryBlobUrl;
+                player.style.display = 'block';
                 player.play();
-            };
 
-            player.onended = () => {
-                status.innerText = "Finished.";
+                // D. Trigger "Save File" Dialog
+                const downloadLink = document.createElement('a');
+                downloadLink.href = currentMemoryBlobUrl;
+                downloadLink.download = "song.m4a"; // The name of the saved file
+                document.body.appendChild(downloadLink);
+                downloadLink.click();
+                document.body.removeChild(downloadLink);
+
+                // E. Update UI
+                status.innerText = "Playing from memory & Saved to device.";
+                btnText.innerText = "Downloaded";
+                btnSpinner.style.display = 'none';
+                btn.disabled = false;
+
+            } catch (err) {
+                console.error(err);
+                status.innerText = "Error during download. Check VPN.";
                 resetButton();
-            };
-            
-            player.onerror = () => {
-                status.innerText = "Network stutter. Retrying...";
-                // Retry logic for unstable connections
-                setTimeout(() => {
-                    if(player.error && player.error.code !== 4) {
-                         player.load();
-                    }
-                }, 2000);
-            };
+            }
         }
 
         function resetButton() {
@@ -269,6 +283,7 @@
             btn.disabled = false;
             document.getElementById('btnText').innerText = "Play & Download";
             document.getElementById('btnSpinner').style.display = 'none';
+            document.getElementById('audioPlayer').style.display = 'none';
         }
 
         document.getElementById('query').addEventListener('keypress', function (e) {
