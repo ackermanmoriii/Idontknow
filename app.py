@@ -20,31 +20,32 @@ if not os.path.exists(DOWNLOAD_FOLDER):
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# --- COOKIE SETUP (Crucial for Cloud Deployment) ---
+# --- COOKIE SETUP (Critical for Cloud Deployment) ---
 # This fixes the "Sign in to confirm you are not a bot" error on Koyeb.
 COOKIE_FILE = 'cookies.txt'
 
-# Option A: Check if cookies are provided via Environment Variable (Best Practice)
+# Option A: Check if cookies are provided via Environment Variable (Best Practice for Security)
 if os.environ.get('YOUTUBE_COOKIES'):
     try:
         # Decode Base64 cookies and write to file
         with open(COOKIE_FILE, 'wb') as f:
             f.write(base64.b64decode(os.environ.get('YOUTUBE_COOKIES')))
-        logger.info("Successfully loaded cookies from Environment Variable.")
+        logger.info("✅ Created cookies.txt from Environment Variable.")
     except Exception as e:
-        logger.error(f"Failed to load cookies from Env Var: {e}")
+        logger.error(f"❌ Failed to load cookies from Env Var: {e}")
 
-# Option B: Logic to check if the file exists (uploaded manually)
+# Option B: Check if the file exists (uploaded manually by you)
 if os.path.exists(COOKIE_FILE):
-    logger.info(f"Found {COOKIE_FILE}, using it for authentication.")
+    logger.info(f"✅ Found {COOKIE_FILE}, using it for authentication.")
 else:
-    logger.warning(f"WARNING: {COOKIE_FILE} not found. YouTube might block requests.")
+    logger.warning("⚠️ WARNING: No cookies found. YouTube will likely block this request.")
 
 # --- Track active downloads ---
 active_downloads = {}
 
 # --- RESILIENCE: Background Failsafe Cleanup ---
 def clean_stale_files():
+    """Deletes files older than 20 minutes in case the VPN disconnects."""
     try:
         now = time.time()
         cutoff = 20 * 60  # 20 minutes expiration
@@ -53,7 +54,7 @@ def clean_stale_files():
             if os.path.isfile(filepath):
                 if now - os.path.getctime(filepath) > cutoff:
                     os.remove(filepath)
-                    logger.info(f"Failsafe Cleanup: Removed stale file {filename}")
+                    logger.info(f"🧹 Failsafe Cleanup: Removed {filename}")
     except Exception as e:
         logger.error(f"Cleanup Error: {e}")
 
@@ -69,13 +70,13 @@ def delete_session_files(session_id):
         for f in glob.glob(pattern):
             try:
                 os.remove(f)
-                logger.info(f"Session Cleanup: Deleted {os.path.basename(f)}")
+                logger.info(f"🗑️ Session Cleanup: Deleted {os.path.basename(f)}")
             except OSError:
                 pass
     except Exception as e:
         logger.error(f"Error in delete_session_files: {e}")
 
-# --- Helper: Download Logic ---
+# --- Helper: Download Logic (Optimized for VPN) ---
 def download_video_thread(url, filename):
     active_downloads[filename] = 'downloading'
     output_template = os.path.join(DOWNLOAD_FOLDER, f"{filename}.%(ext)s")
@@ -87,21 +88,32 @@ def download_video_thread(url, filename):
         'quiet': True,
         'no_warnings': True,
         
-        # --- Authentication & Resilience ---
-        'cookiefile': COOKIE_FILE if os.path.exists(COOKIE_FILE) else None, # USE COOKIES HERE
-        'source_address': '0.0.0.0',
-        'socket_timeout': 30,
-        'retries': 10,
-        'fragment_retries': 10,
+        # --- Authentication ---
+        'cookiefile': COOKIE_FILE if os.path.exists(COOKIE_FILE) else None,
+        
+        # --- VPN/Network Resilience Settings ---
+        'source_address': '0.0.0.0', # Force IPv4
+        'socket_timeout': 60,        # Extended timeout for slow VPN handshake
+        'retries': 30,               # Retry aggressively on connection drop
+        'fragment_retries': 30,      # Retry individual chunks
+        'retry_sleep': 5,            # Wait 5s before retrying to avoid "hammering"
+        
+        # --- Micro-Chunking (The Fix for "Regressing Progress") ---
+        # Downloads in small 1MB pieces. If connection drops, we only lose 1MB.
+        'http_chunk_size': 1048576, 
+        
+        # --- Anti-Throttling ---
+        # Cap speed to 10MB/s to avoid looking like a bot/DDoS
+        'ratelimit': 10000000, 
     }
 
     try:
         with YoutubeDL(ydl_opts) as ydl:
             ydl.download([url])
         active_downloads[filename] = 'completed'
-        logger.info(f"Download Complete: {filename}")
+        logger.info(f"✅ Download Complete: {filename}")
     except Exception as e:
-        logger.error(f"Download Failed: {e}")
+        logger.error(f"❌ Download Failed: {e}")
         active_downloads[filename] = 'error'
 
 # --- Routes ---
@@ -134,10 +146,8 @@ def search():
             'default_search': 'ytsearch1',
             'no_warnings': True, 
             'source_address': '0.0.0.0',
-            'socket_timeout': 15,
-            
-            # --- Authentication (The Fix) ---
-            'cookiefile': COOKIE_FILE if os.path.exists(COOKIE_FILE) else None, # USE COOKIES HERE
+            'socket_timeout': 15, # Shorter timeout for search
+            'cookiefile': COOKIE_FILE if os.path.exists(COOKIE_FILE) else None,
         }
         
         with YoutubeDL(ydl_opts) as ydl:
@@ -151,7 +161,6 @@ def search():
             })
 
     except Exception as e:
-        # Improved Error Logging for Koyeb
         logger.exception("Search Failed")
         return jsonify({'error': str(e)}), 500
 
@@ -173,16 +182,17 @@ def stream():
         timeout = 0
         
         while True:
+            # Look for the file growing on disk
             matches = glob.glob(os.path.join(DOWNLOAD_FOLDER, f"{file_id}*"))
             if matches:
                 temp_path = matches[0]
-                # Wait for 2KB headers
+                # Wait for at least 2KB of headers so browser knows format
                 if os.path.exists(temp_path) and os.path.getsize(temp_path) > 2048:
                     filepath = temp_path
                     break
             
             if active_downloads.get(file_id) == 'error': return
-            if timeout > 60: return 
+            if timeout > 120: return # Allow 60 seconds (0.5 * 120) for initial connect (slow VPN)
             
             time.sleep(0.5)
             timeout += 1
