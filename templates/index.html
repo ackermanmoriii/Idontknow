@@ -5,200 +5,47 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Music App</title>
     <style>
-        /* --- Dark Theme UI --- */
-        :root {
-            --bg-color: #121212;
-            --card-bg: #1e1e1e;
-            --text-main: #ffffff;
-            --text-sec: #b3b3b3;
-            --accent: #1db954; /* Spotify Green */
-        }
-
-        body {
-            background-color: var(--bg-color);
-            color: var(--text-main);
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-            margin: 0;
-            padding: 20px;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            min-height: 100vh;
-            -webkit-tap-highlight-color: transparent;
-        }
-
-        .container {
-            width: 100%;
-            max-width: 500px;
-            padding-bottom: 50px;
-        }
-
-        h1 {
-            text-align: center;
-            margin-bottom: 25px;
-            color: var(--accent);
-            font-weight: 800;
-        }
-
-        /* Search Bar */
-        .search-container {
-            display: flex;
-            gap: 10px;
-            margin-bottom: 20px;
-        }
-
-        input {
-            flex: 1;
-            padding: 15px 20px;
-            border-radius: 30px;
-            border: none;
-            background: #282828;
-            color: white;
-            font-size: 16px;
-            outline: none;
-        }
-
-        button.search-btn {
-            background: var(--accent);
-            color: white;
-            border: none;
-            padding: 0 25px;
-            border-radius: 30px;
-            font-weight: bold;
-            font-size: 16px;
-            cursor: pointer;
-        }
-
-        /* Results Card */
-        .card {
-            background: var(--card-bg);
-            border-radius: 12px;
-            padding: 20px;
-            display: none; /* Hidden by default */
-            flex-direction: column;
-            align-items: center;
-            width: 100%;
-            box-sizing: border-box;
-            box-shadow: 0 8px 20px rgba(0,0,0,0.4);
-        }
-
-        img.thumbnail {
-            width: 100%;
-            aspect-ratio: 16/9;
-            object-fit: cover;
-            border-radius: 8px;
-            margin-bottom: 15px;
-            background: #000;
-        }
-
-        .title {
-            font-size: 1.1rem;
-            font-weight: bold;
-            margin-bottom: 5px;
-            text-align: center;
-            line-height: 1.4;
-            color: var(--text-main);
-        }
-
-        /* Control Buttons */
-        .btn-main {
-            background: white;
-            color: black;
-            padding: 15px 30px;
-            border-radius: 50px;
-            font-weight: bold;
-            font-size: 16px;
-            margin-top: 20px;
-            width: 100%;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            gap: 10px;
-            cursor: pointer;
-            border: none;
-        }
-
-        .btn-main:disabled {
-            background: #555;
-            color: #888;
-            cursor: wait;
-        }
+        :root { --bg: #121212; --card: #1e1e1e; --text: #fff; --accent: #1db954; }
+        body { background: var(--bg); color: var(--text); font-family: sans-serif; margin: 0; padding: 20px; display: flex; flex-direction: column; align-items: center; min-height: 100vh; }
+        .container { width: 100%; max-width: 500px; }
+        h1 { color: var(--accent); margin-bottom: 20px; }
+        .search-box { display: flex; gap: 10px; margin-bottom: 20px; }
+        input { flex: 1; padding: 15px; border-radius: 30px; border: none; background: #333; color: white; outline: none; }
+        button { background: var(--accent); color: white; border: none; padding: 0 25px; border-radius: 30px; font-weight: bold; cursor: pointer; }
+        .card { background: var(--card); border-radius: 12px; padding: 20px; display: none; flex-direction: column; align-items: center; margin-top: 20px;}
+        img { width: 100%; border-radius: 8px; margin-bottom: 15px; }
         
-        /* Play Button (Green) - Hidden initially */
-        .play-only-btn {
-            background: var(--accent);
-            color: white;
-            padding: 15px 30px;
-            border-radius: 50px;
-            font-weight: bold;
-            font-size: 1.2rem;
-            margin-top: 15px;
-            width: 100%;
-            border: none;
-            cursor: pointer;
-            display: none; 
-            box-shadow: 0 4px 15px rgba(29, 185, 84, 0.4);
-        }
-
-        .play-only-btn:active { transform: scale(0.98); }
-
-        /* Audio Player */
-        audio {
-            width: 100%;
-            margin-top: 20px;
-            display: none;
-        }
-
-        /* Status Text */
-        #status {
-            margin-top: 15px;
-            font-size: 0.9rem;
-            color: var(--text-sec);
-            text-align: center;
-            min-height: 20px;
-        }
-
-        /* Loading Spinner */
-        .spinner {
-            width: 22px;
-            height: 22px;
-            border: 3px solid rgba(255,255,255,0.1);
-            border-top: 3px solid var(--accent);
-            border-radius: 50%;
-            animation: spin 0.8s linear infinite;
-            display: none;
-        }
+        .btn-main { background: white; color: black; padding: 15px 30px; border-radius: 50px; font-weight: bold; margin-top: 20px; width: 100%; display: flex; justify-content: center; gap: 10px; cursor: pointer; border: none;}
+        .btn-main:disabled { background: #555; color: #888; }
         
-        #btnSpin { border-top-color: #000; }
-
+        .play-only-btn { background: var(--accent); color: white; padding: 15px 30px; border-radius: 50px; font-weight: bold; margin-top: 15px; width: 100%; border: none; cursor: pointer; display: none; font-size: 1.2rem; }
+        
+        audio { width: 100%; margin-top: 20px; display: none; }
+        .spinner { width: 20px; height: 20px; border: 3px solid #555; border-top: 3px solid var(--accent); border-radius: 50%; animation: spin 1s infinite; display: none; }
         @keyframes spin { to { transform: rotate(360deg); } }
+        #status { margin-top: 10px; color: #888; font-size: 0.9rem; text-align: center; }
     </style>
 </head>
 <body>
-
     <div class="container">
         <h1>Music App</h1>
-
-        <!-- Search Section -->
-        <div class="search-container">
-            <input type="text" id="query" placeholder="Enter song name..." enterkeyhint="search">
-            <button class="search-btn" onclick="searchSong()">Go</button>
+        <div class="search-box">
+            <input type="text" id="query" placeholder="Song name...">
+            <button onclick="search()">Go</button>
         </div>
+        <div id="loader" class="spinner" style="margin: 0 auto;"></div>
         
-        <div id="mainLoader" class="spinner" style="margin: 20px auto;"></div>
-
-        <!-- Content Card -->
         <div class="card" id="card">
-            <img id="thumb" src="" alt="Art">
-            <div class="title" id="title"></div>
+            <img id="thumb" src="">
+            <h3 id="title" style="text-align: center;"></h3>
             
-            <!-- BUTTON 1: Prepare/Buffer -->
+            <!-- Step 1: Buffer Button -->
             <button class="btn-main" id="bufferBtn" onclick="bufferSong()">
                 <div class="spinner" id="btnSpin"></div>
                 <span id="btnText">Prepare Song</span>
             </button>
             
-            <!-- BUTTON 2: Play (Shows after buffering) -->
+            <!-- Step 2: Play Button (Hidden initially) -->
             <button class="play-only-btn" id="playNowBtn" onclick="playFromMemory()">
                 ▶ Play Song
             </button>
@@ -209,135 +56,90 @@
     </div>
 
     <script>
-        // Generate a random Session ID
-        const sessionId = "sess_" + Date.now() + Math.random().toString(36).substr(2, 5);
-        
-        // Variable to hold the song in browser RAM
+        const sessionId = "sess_" + Date.now();
         let currentMemoryBlobUrl = null;
 
-        // --- 1. SEARCH ---
-        async function searchSong() {
-            const query = document.getElementById('query').value.trim();
-            if (!query) return;
+        async function search() {
+            const q = document.getElementById('query').value;
+            if(!q) return;
+            
+            // Clean up old memory
+            if (currentMemoryBlobUrl) { URL.revokeObjectURL(currentMemoryBlobUrl); currentMemoryBlobUrl = null; }
 
-            // Clear old song from RAM to save memory
-            if (currentMemoryBlobUrl) {
-                URL.revokeObjectURL(currentMemoryBlobUrl);
-                currentMemoryBlobUrl = null;
-            }
-
-            // UI Reset
-            document.getElementById('query').blur();
             document.getElementById('card').style.display = 'none';
-            document.getElementById('mainLoader').style.display = 'block';
+            document.getElementById('loader').style.display = 'block';
             document.getElementById('player').pause();
             
             try {
-                // Call Server Search
                 const res = await fetch('/search', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json', 'X-Session-ID': sessionId },
-                    body: JSON.stringify({query: query})
+                    body: JSON.stringify({query: q})
                 });
-
                 const data = await res.json();
-                document.getElementById('mainLoader').style.display = 'none';
-
-                if (res.ok) {
-                    // Show Results
+                document.getElementById('loader').style.display = 'none';
+                
+                if(res.ok) {
                     document.getElementById('thumb').src = data.thumbnail;
                     document.getElementById('title').innerText = data.title;
                     document.getElementById('card').style.display = 'flex';
                     document.getElementById('bufferBtn').dataset.url = data.url;
                     resetUI();
-                    document.getElementById('status').innerText = "";
-                } else {
-                    document.getElementById('status').innerText = "Error: " + data.error;
                 }
-            } catch (err) {
-                document.getElementById('mainLoader').style.display = 'none';
-                alert("Connection failed. Check VPN.");
-            }
+            } catch(e) { alert("VPN Error"); }
         }
 
-        // --- 2. BUFFER (Download to RAM) ---
         async function bufferSong() {
             const url = document.getElementById('bufferBtn').dataset.url;
             const status = document.getElementById('status');
-            const btn = document.getElementById('bufferBtn');
-            const btnText = document.getElementById('btnText');
-            const btnSpin = document.getElementById('btnSpin');
-
-            // UI Loading State
-            btn.disabled = true;
-            btnSpin.style.display = 'block';
-            btnText.innerText = "Caching...";
+            
+            document.getElementById('bufferBtn').disabled = true;
+            document.getElementById('btnSpin').style.display = 'block';
+            document.getElementById('btnText').innerText = "Caching...";
             status.innerText = "Downloading to browser memory (Please wait)...";
 
             try {
-                // Fetch the full file from server
-                // The server waits until it's 100% ready before sending response
+                // CALLING THE NEW ENDPOINT: /fetch_song
                 const res = await fetch(`/fetch_song?url=${encodeURIComponent(url)}&session_id=${sessionId}`);
-                
-                if (!res.ok) throw new Error("Download failed or timed out");
+                if (!res.ok) throw new Error("Download failed");
 
-                // Save to Blob (Browser Memory)
-                const blob = await res.blob();
-                
-                // Create link to RAM
+                const blob = await res.blob(); 
                 currentMemoryBlobUrl = URL.createObjectURL(blob);
 
-                // UI Success State
-                status.innerText = "Song buffered in memory. Ready.";
-                btn.style.display = 'none'; // Hide Prepare button
-                document.getElementById('playNowBtn').style.display = 'block'; // Show Play button
+                status.innerText = "Song cached in memory. Ready.";
+                document.getElementById('bufferBtn').style.display = 'none';
+                document.getElementById('playNowBtn').style.display = 'block';
 
             } catch (err) {
-                console.error(err);
                 status.innerText = "Error: " + err.message;
                 resetUI();
             }
         }
 
-        // --- 3. PLAY & CLEANUP ---
         function playFromMemory() {
             const player = document.getElementById('player');
-            
-            // Set source to the RAM Blob
             player.src = currentMemoryBlobUrl;
             player.style.display = 'block';
+            player.play();
             
-            // Start Playing
-            const playPromise = player.play();
-            if (playPromise !== undefined) {
-                playPromise.catch(error => {
-                    console.log("Auto-play prevented");
-                });
-            }
-            
-            document.getElementById('status').innerText = "Playing from browser cache.";
-            document.getElementById('playNowBtn').style.display = 'none';
-
-            // Auto-Delete from RAM when song ends
+            // Auto-delete from memory when song ends
             player.onended = () => {
                 document.getElementById('status').innerText = "Finished. Memory cleared.";
-                URL.revokeObjectURL(currentMemoryBlobUrl); // DELETE FROM RAM
+                URL.revokeObjectURL(currentMemoryBlobUrl); 
                 currentMemoryBlobUrl = null;
                 resetUI();
             };
         }
 
         function resetUI() {
-            const btn = document.getElementById('bufferBtn');
-            btn.disabled = false;
-            btn.style.display = 'flex';
+            document.getElementById('bufferBtn').disabled = false;
+            document.getElementById('bufferBtn').style.display = 'flex';
             document.getElementById('btnText').innerText = "Prepare Song";
             document.getElementById('btnSpin').style.display = 'none';
             document.getElementById('playNowBtn').style.display = 'none';
             document.getElementById('player').style.display = 'none';
         }
-
-        // Allow Enter key to search
+        
         document.getElementById('query').addEventListener('keypress', function (e) {
             if (e.key === 'Enter') searchSong();
         });
