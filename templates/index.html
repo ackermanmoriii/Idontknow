@@ -23,6 +23,11 @@
         
         .play-only-btn { background: var(--accent); color: white; padding: 15px 30px; border-radius: 50px; font-weight: bold; margin-top: 15px; width: 100%; border: none; cursor: pointer; display: none; font-size: 1.2rem; }
         
+        /* Action Buttons Container */
+        .actions { width: 100%; display: flex; gap: 10px; margin-top: 15px; display: none; }
+        .btn-play { background: var(--accent); color: white; padding: 15px; border-radius: 50px; font-weight: bold; flex: 2; border: none; cursor: pointer; font-size: 1.1rem; }
+        .btn-save { background: #333; color: white; padding: 15px; border-radius: 50px; font-weight: bold; flex: 1; border: none; cursor: pointer; font-size: 1.1rem; display: flex; justify-content: center; align-items: center;}
+
         audio { width: 100%; margin-top: 20px; display: none; }
         .spinner { width: 20px; height: 20px; border: 3px solid #555; border-top: 3px solid var(--accent); border-radius: 50%; animation: spin 1s infinite; display: none; }
         @keyframes spin { to { transform: rotate(360deg); } }
@@ -48,10 +53,11 @@
                 <span id="btnText">Prepare Song</span>
             </button>
             
-            <!-- Step 2: Play -->
-            <button class="play-only-btn" id="playNowBtn" onclick="playFromMemory()">
-                ▶ Play Song
-            </button>
+            <!-- Step 2: Play & Save (Hidden initially) -->
+            <div class="actions" id="actionArea">
+                <button class="btn-play" onclick="playFromMemory()">▶ Play</button>
+                <button class="btn-save" onclick="saveToPhone()">💾 Save</button>
+            </div>
             
             <div id="status"></div>
             <audio id="player" controls controlsList="nodownload"></audio>
@@ -109,7 +115,7 @@
             status.innerText = "Downloading to browser memory...";
 
             try {
-                // 1. Fetch file from server
+                // 1. Fetch file from server (Wait for full download)
                 const res = await fetch(`/fetch_song?url=${encodeURIComponent(url)}&session_id=${sessionId}`);
                 if (!res.ok) throw new Error("Download failed");
 
@@ -119,7 +125,7 @@
 
                 status.innerText = "Song buffered in RAM. Ready.";
                 document.getElementById('bufferBtn').style.display = 'none';
-                document.getElementById('playNowBtn').style.display = 'block';
+                document.getElementById('actionArea').style.display = 'flex';
 
             } catch (err) {
                 status.innerText = "Error: " + err.message;
@@ -144,8 +150,7 @@
             .catch(e => console.log("Play error:", e));
             
             document.getElementById('status').innerText = "Playing from Memory.";
-            document.getElementById('playNowBtn').style.display = 'none';
-
+            
             // Auto-delete from RAM
             player.onended = () => {
                 document.getElementById('status').innerText = "Finished. Memory cleared.";
@@ -155,12 +160,26 @@
             };
         }
 
+        // --- SAVE TO PHONE FUNCTION ---
+        function saveToPhone() {
+            if (!currentMemoryBlobUrl) return;
+            
+            const a = document.createElement('a');
+            a.href = currentMemoryBlobUrl;
+            a.download = document.getElementById('title').innerText + ".m4a"; 
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            
+            document.getElementById('status').innerText = "Saved to Downloads folder.";
+        }
+
         function resetUI() {
             document.getElementById('bufferBtn').disabled = false;
             document.getElementById('bufferBtn').style.display = 'flex';
             document.getElementById('btnText').innerText = "Prepare Song";
             document.getElementById('btnSpin').style.display = 'none';
-            document.getElementById('playNowBtn').style.display = 'none';
+            document.getElementById('actionArea').style.display = 'none';
             document.getElementById('player').style.display = 'none';
         }
         
