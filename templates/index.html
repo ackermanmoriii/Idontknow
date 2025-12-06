@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <!-- PWA Link for Android Background Support -->
+    <!-- PWA Manifest Link for Android Background Support -->
     <link rel="manifest" href="/manifest.json">
     <meta name="theme-color" content="#1db954">
     <title>Music Player</title>
@@ -110,9 +110,12 @@
 
         // 1. Initialize PWA Background Engine
         if ('serviceWorker' in navigator) {
-            navigator.serviceWorker.register('/sw.js')
-                .then(() => console.log("Engine Active"))
-                .catch(err => console.error("Engine Error", err));
+            // Fix: Only register if protocol is http or https (prevents error in preview/blob environment)
+            if (['https:', 'http:'].includes(window.location.protocol)) {
+                navigator.serviceWorker.register('/sw.js')
+                    .then(() => console.log("Engine Active"))
+                    .catch(err => console.error("Engine Error", err));
+            }
         }
 
         // --- SEARCH FUNCTION ---
