@@ -5,7 +5,7 @@ import threading
 import logging
 import glob
 import base64
-from flask import Flask, render_template, request, jsonify, send_file, make_response
+from flask import Flask, render_template, request, jsonify, send_file, make_response, Response, stream_with_context
 from yt_dlp import YoutubeDL
 from apscheduler.schedulers.background import BackgroundScheduler
 
@@ -46,7 +46,7 @@ scheduler = BackgroundScheduler()
 scheduler.add_job(func=clean_stale_files, trigger="interval", minutes=5)
 scheduler.start()
 
-# --- PWA BACKGROUND ENGINE (CRITICAL) ---
+# --- PWA BACKEND ---
 @app.route('/manifest.json')
 def manifest():
     return jsonify({
@@ -61,18 +61,14 @@ def manifest():
 
 @app.route('/sw.js')
 def service_worker():
-    # This script runs in the background to serve audio from Cache
     js_content = """
     self.addEventListener('install', event => self.skipWaiting());
     self.addEventListener('activate', event => event.waitUntil(clients.claim()));
-    
     self.addEventListener('fetch', event => {
-        // If the browser asks for the virtual song file...
         if (event.request.url.includes('/virtual-song.mp3')) {
             event.respondWith(
-                caches.open('temp-music-cache').then(cache => {
+                caches.open('music-cache').then(cache => {
                     return cache.match('/virtual-song.mp3').then(response => {
-                        // Serve it from the Internal Cache
                         return response || new Response("Buffering...", {status: 200});
                     });
                 })
@@ -96,10 +92,12 @@ def run_download(url, file_id):
         'quiet': True,
         'cookiefile': COOKIE_FILE if os.path.exists(COOKIE_FILE) else None,
         'source_address': '0.0.0.0',
-        'socket_timeout': 60,
+        'socket_timeout': 30,
         'retries': 30,
         'fragment_retries': 30,
-        'retry_sleep': 5,
+        
+        # SPEED BOOSTERS
+        'concurrent_fragment_downloads': 4, # Download 4 parts at once
         'http_chunk_size': 1048576, 
     }
 
@@ -120,12 +118,10 @@ def search():
     try:
         data = request.get_json()
         query = data.get('query')
-        
         ydl_opts = {
             'noplaylist': True, 'quiet': True, 'default_search': 'ytsearch1',
             'cookiefile': COOKIE_FILE if os.path.exists(COOKIE_FILE) else None,
         }
-        
         with YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(query, download=False)
             video = info['entries'][0] if 'entries' in info else info
@@ -143,25 +139,43 @@ def fetch_song():
     session_id = request.args.get('session_id')
     file_id = f"{session_id}_{uuid.uuid4()}"
     
+    # Start Download
     thread = threading.Thread(target=run_download, args=(video_url, file_id))
     thread.start()
 
-    timeout = 0
-    filepath = None
-    while timeout < 120: 
-        if active_downloads.get(file_id) == 'completed':
+    # Streaming Generator (The Speed Fix)
+    def generate():
+        filepath = None
+        timeout = 0
+        
+        # 1. Wait for file start (Max 30s)
+        while timeout < 60:
             matches = glob.glob(os.path.join(DOWNLOAD_FOLDER, f"{file_id}*"))
-            if matches:
+            if matches and os.path.getsize(matches[0]) > 1024: # Wait for 1KB
                 filepath = matches[0]
                 break
-        elif active_downloads.get(file_id) == 'error':
-            return "Error", 500
-        time.sleep(1)
-        timeout += 1
+            if active_downloads.get(file_id) == 'error': return
+            time.sleep(0.5)
+            timeout += 1
+            
+        if not filepath: return 
 
-    if filepath:
-        return send_file(filepath, as_attachment=True, download_name="song.m4a")
-    return "Timeout", 504
+        # 2. Stream while growing
+        with open(filepath, "rb") as f:
+            while True:
+                chunk = f.read(1024 * 64) # Read 64KB chunks
+                if chunk:
+                    yield chunk
+                else:
+                    # If end of file, check if download is truly done
+                    status = active_downloads.get(file_id)
+                    if status == 'completed': break
+                    if status == 'error': break
+                    time.sleep(0.1) # Wait for more data
+
+    return Response(stream_with_context(generate()), mimetype="audio/mp4", headers={
+        "Content-Disposition": f"attachment; filename=song.m4a"
+    })
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=True, threaded=True)
