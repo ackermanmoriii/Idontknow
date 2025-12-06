@@ -5,7 +5,7 @@ import threading
 import logging
 import glob
 import base64
-from flask import Flask, render_template, request, jsonify, send_file, make_response, Response, stream_with_context
+from flask import Flask, render_template, request, jsonify, send_file, make_response
 from yt_dlp import YoutubeDL
 from apscheduler.schedulers.background import BackgroundScheduler
 
@@ -117,34 +117,45 @@ def search():
         data = request.get_json()
         query = data.get('query')
         
-        # UPGRADE: Search for 20 items to create a playlist/queue
+        # --- FIXED SEARCH ENGINE (INSTANT RESULTS) ---
         ydl_opts = {
-            'noplaylist': True, 
             'quiet': True, 
-            'default_search': 'ytsearch20', # Search for 20 items
+            'default_search': 'ytsearch10', # Get 10 results (Fast enough for playlist)
             'cookiefile': COOKIE_FILE if os.path.exists(COOKIE_FILE) else None,
-            'extract_flat': True # Faster search, just gets metadata
+            'extract_flat': 'in_playlist', # CRITICAL: This makes it instant (no deep scanning)
+            'skip_download': True
         }
         
         with YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(query, download=False)
             
             results = []
-            if 'entries' in info:
-                for entry in info['entries']:
-                    # Filter out live streams or incomplete data
-                    if entry.get('duration'):
-                        results.append({
-                            'title': entry.get('title'),
-                            'url': entry.get('url') or entry.get('webpage_url'),
-                            # YoutubeDL flat extraction doesn't always give full thumbs, handle gracefully
-                            'thumbnail': f"https://i.ytimg.com/vi/{entry.get('id')}/hqdefault.jpg",
-                            'duration': entry.get('duration')
-                        })
+            # Handle list of results
+            entries = info.get('entries', [])
+            if not entries: entries = [info] 
+
+            for entry in entries:
+                # Robust parsing for "flat" extraction (some fields might be missing)
+                video_id = entry.get('id')
+                if not video_id: continue
+                
+                title = entry.get('title', 'Unknown Title')
+                # Construct URL manually if missing (common in flat extraction)
+                url = entry.get('url') or f"https://www.youtube.com/watch?v={video_id}"
+                # Construct Thumbnail manually (faster than scraping)
+                thumbnail = entry.get('thumbnail') or f"https://i.ytimg.com/vi/{video_id}/hqdefault.jpg"
+                
+                results.append({
+                    'title': title,
+                    'url': url,
+                    'thumbnail': thumbnail,
+                    'duration': entry.get('duration')
+                })
             
             return jsonify({'results': results})
 
     except Exception as e:
+        logger.error(f"Search Error: {e}")
         return jsonify({'error': str(e)}), 500
 
 @app.route('/fetch_song')
