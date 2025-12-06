@@ -5,7 +5,7 @@ import threading
 import logging
 import glob
 import base64
-from flask import Flask, render_template, request, jsonify, send_file, make_response
+from flask import Flask, render_template, request, jsonify, send_file, make_response, Response, stream_with_context
 from yt_dlp import YoutubeDL
 from apscheduler.schedulers.background import BackgroundScheduler
 
@@ -31,14 +31,13 @@ elif os.environ.get('YOUTUBE_COOKIES'):
 
 active_downloads = {}
 
-# --- CLEANUP TASK ---
+# --- CLEANUP ---
 def clean_stale_files():
     try:
         now = time.time()
         for filename in os.listdir(DOWNLOAD_FOLDER):
             filepath = os.path.join(DOWNLOAD_FOLDER, filename)
             if os.path.isfile(filepath):
-                # Keep files for 10 mins (enough to buffer to phone)
                 if now - os.path.getctime(filepath) > 600: 
                     os.remove(filepath)
     except Exception: pass
@@ -47,7 +46,7 @@ scheduler = BackgroundScheduler()
 scheduler.add_job(func=clean_stale_files, trigger="interval", minutes=5)
 scheduler.start()
 
-# --- PWA BACKEND (Required for App Install) ---
+# --- PWA BACKEND ---
 @app.route('/manifest.json')
 def manifest():
     return jsonify({
@@ -65,7 +64,6 @@ def service_worker():
     js_content = """
     self.addEventListener('install', event => self.skipWaiting());
     self.addEventListener('activate', event => event.waitUntil(clients.claim()));
-    
     self.addEventListener('fetch', event => {
         if (event.request.url.includes('/virtual-song.mp3')) {
             event.respondWith(
@@ -82,7 +80,7 @@ def service_worker():
     response.headers['Content-Type'] = 'application/javascript'
     return response
 
-# --- DOWNLOAD LOGIC (SPEED BOOSTED) ---
+# --- DOWNLOAD LOGIC ---
 def run_download(url, file_id):
     active_downloads[file_id] = 'downloading'
     output_template = os.path.join(DOWNLOAD_FOLDER, f"{file_id}.%(ext)s")
@@ -94,17 +92,10 @@ def run_download(url, file_id):
         'quiet': True,
         'cookiefile': COOKIE_FILE if os.path.exists(COOKIE_FILE) else None,
         'source_address': '0.0.0.0',
-        
-        # --- SPEED & RESILIENCE SETTINGS ---
-        'socket_timeout': 60,
+        'socket_timeout': 30,
         'retries': 30,
         'fragment_retries': 30,
-        'retry_sleep': 5,
-        
-        # SPEED HACK: Download 5 parts at once!
         'concurrent_fragment_downloads': 5, 
-        
-        # Stability: Keep chunk size moderate
         'http_chunk_size': 1048576, 
     }
 
@@ -115,7 +106,7 @@ def run_download(url, file_id):
     except Exception:
         active_downloads[file_id] = 'error'
 
-# --- ROUTES ---
+# --- API ROUTES ---
 @app.route('/')
 def index():
     return render_template('index.html')
@@ -125,18 +116,34 @@ def search():
     try:
         data = request.get_json()
         query = data.get('query')
+        
+        # UPGRADE: Search for 20 items to create a playlist/queue
         ydl_opts = {
-            'noplaylist': True, 'quiet': True, 'default_search': 'ytsearch1',
+            'noplaylist': True, 
+            'quiet': True, 
+            'default_search': 'ytsearch20', # Search for 20 items
             'cookiefile': COOKIE_FILE if os.path.exists(COOKIE_FILE) else None,
+            'extract_flat': True # Faster search, just gets metadata
         }
+        
         with YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(query, download=False)
-            video = info['entries'][0] if 'entries' in info else info
-            return jsonify({
-                'title': video.get('title'),
-                'url': video.get('webpage_url'),
-                'thumbnail': video.get('thumbnail'),
-            })
+            
+            results = []
+            if 'entries' in info:
+                for entry in info['entries']:
+                    # Filter out live streams or incomplete data
+                    if entry.get('duration'):
+                        results.append({
+                            'title': entry.get('title'),
+                            'url': entry.get('url') or entry.get('webpage_url'),
+                            # YoutubeDL flat extraction doesn't always give full thumbs, handle gracefully
+                            'thumbnail': f"https://i.ytimg.com/vi/{entry.get('id')}/hqdefault.jpg",
+                            'duration': entry.get('duration')
+                        })
+            
+            return jsonify({'results': results})
+
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
@@ -146,15 +153,11 @@ def fetch_song():
     session_id = request.args.get('session_id')
     file_id = f"{session_id}_{uuid.uuid4()}"
     
-    # 1. Start Download in Background
     thread = threading.Thread(target=run_download, args=(video_url, file_id))
     thread.start()
 
-    # 2. WAIT for completion (Ensures File is valid)
     timeout = 0
     filepath = None
-    
-    # Wait loop (Up to 120s, but speed boost should make it fast)
     while timeout < 120: 
         if active_downloads.get(file_id) == 'completed':
             matches = glob.glob(os.path.join(DOWNLOAD_FOLDER, f"{file_id}*"))
@@ -167,7 +170,6 @@ def fetch_song():
         timeout += 1
 
     if filepath:
-        # Send full file (Guarantees playback works)
         return send_file(filepath, as_attachment=True, download_name="song.m4a")
     return "Timeout", 504
 
